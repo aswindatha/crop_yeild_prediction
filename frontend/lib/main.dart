@@ -39,7 +39,7 @@ class CropYieldApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Crop Yield Predictor',
+      title: 'CropWise',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
@@ -288,7 +288,8 @@ class _PredictionScreenState extends State<PredictionScreen> {
                     gradient: LinearGradient(colors: [AppColors.primary.withOpacity(0.15), AppColors.accent.withOpacity(0.2)], begin: Alignment.topLeft, end: Alignment.bottomRight),
                     shape: BoxShape.circle,
                   ),
-                  child: Icon(Icons.agriculture_rounded, size: 48, color: AppColors.primary),
+                  child: Image.asset('assets/images/logo.png', width: 48, height: 48),
+                  // child: Icon(Icons.eco_rounded, size: 48, color: AppColors.primary),
                 ),
                 const SizedBox(height: 20),
                 Text('Predicted Yield', style: GoogleFonts.poppins(fontSize: 15, color: AppColors.textSecondary, fontWeight: FontWeight.w500)),
@@ -429,7 +430,7 @@ class _PredictionScreenState extends State<PredictionScreen> {
               ),
             ),
             title: Text(
-              'Crop Yield Predictor',
+              'CropWise',
               style: GoogleFonts.poppins(
                 fontSize: 20,
                 fontWeight: FontWeight.w600,

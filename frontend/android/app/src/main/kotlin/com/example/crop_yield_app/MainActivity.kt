@@ -1,4 +1,4 @@
-package com.example.crop_yield_app
+package com.example.crop_wise
 
 import io.flutter.embedding.android.FlutterActivity
 
