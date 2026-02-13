@@ -364,6 +364,77 @@ def get_soil_data(lat, lon):
     
     return soil_properties
 
+def get_location_name(lat, lon):
+    """Get location name from coordinates using Nominatim API"""
+    try:
+        url = "https://nominatim.openstreetmap.org/reverse"
+        params = {
+            'lat': lat,
+            'lon': lon,
+            'format': 'json',
+            'addressdetails': 1,
+            'zoom': 10
+        }
+        
+        headers = {
+            'User-Agent': 'CropYieldPredictor/1.0'
+        }
+        
+        response = requests.get(url, params=params, headers=headers, timeout=10)
+        data = response.json()
+        
+        if response.status_code == 200 and 'address' in data:
+            address = data['address']
+            
+            # Build location name from available components
+            location_parts = []
+            
+            # Add village/town/city if available
+            if 'village' in address:
+                location_parts.append(address['village'])
+            elif 'town' in address:
+                location_parts.append(address['town'])
+            elif 'city' in address:
+                location_parts.append(address['city'])
+            
+            # Add district if available
+            if 'county' in address:
+                location_parts.append(address['county'])
+            elif 'district' in address:
+                location_parts.append(address['district'])
+            
+            # Add state if available
+            if 'state' in address:
+                location_parts.append(address['state'])
+            
+            # If no specific parts, use display name
+            if not location_parts and 'display_name' in data:
+                # Take first few parts of display name
+                display_name = data['display_name'].split(',')
+                location_parts = [part.strip() for part in display_name[:3]]
+            
+            location_name = ', '.join(location_parts) if location_parts else data.get('display_name', 'Unknown Location')
+            
+            return {
+                'name': location_name,
+                'display_name': data.get('display_name', location_name),
+                'address': address
+            }
+        else:
+            return {
+                'name': f'Lat: {lat:.4f}, Lon: {lon:.4f}',
+                'display_name': f'Lat: {lat:.4f}, Lon: {lon:.4f}',
+                'address': {}
+            }
+            
+    except Exception as e:
+        print(f"Geocoding API error: {e}")
+        return {
+            'name': f'Lat: {lat:.4f}, Lon: {lon:.4f}',
+            'display_name': f'Lat: {lat:.4f}, Lon: {lon:.4f}',
+            'address': {}
+        }
+
 def determine_region(lat):
     """Determine region based on latitude"""
     # Simple logic based on Indian geography
@@ -584,6 +655,12 @@ def predict():
         print(f"  Sand: {soil_data['sand']}%")
         print(f"  Silt: {soil_data['silt']}%")
         
+        # Get location name
+        print("\n FETCHING LOCATION NAME...")
+        print("-" * 40)
+        location_data = get_location_name(lat, lon)
+        print(f"  Location Name: {location_data['name']}")
+        
         # Determine region
         print("\n REGION DETERMINATION...")
         print("-" * 40)
@@ -637,22 +714,53 @@ def predict():
                 print(f"  Transformer Prediction: {model_details.get('transformer_prediction', 'N/A'):.2f} kg")
                 print(f"  Average Prediction: {predicted_yield:.2f} kg")
         
-        # Prepare response
-        response = {
-            'predicted_yield_kg': round(float(predicted_yield), 2),
-            'input_features': convert_to_native(input_features),
-            'model_details': convert_to_native(model_details) if model_details else {},
-            'api_data': {
-                'weather': {
-                    'avg_temp': float(avg_temp),
-                    'rainfall': float(rainfall),
-                    'humidity_percent': float(humidity_percent)
-                },
-                'soil': convert_to_native(soil_data),
-                'region': region,
-                'month': int(current_month)
+        # Prepare response with proper JSON serialization
+        try:
+            response = {
+                'predicted_yield_kg': round(float(predicted_yield), 2),
+                'input_features': convert_to_native(input_features),
+                'model_details': convert_to_native(model_details) if model_details else {},
+                'api_data': {
+                    'weather': {
+                        'avg_temp': float(avg_temp),
+                        'rainfall': float(rainfall),
+                        'humidity_percent': float(humidity_percent)
+                    },
+                    'soil': convert_to_native(soil_data),
+                    'region': region,
+                    'month': int(current_month),
+                    'location': {
+                        'name': location_data['name'],
+                        'display_name': location_data['display_name'],
+                        'coordinates': {'lat': float(lat), 'lon': float(lon)}
+                    }
+                }
             }
-        }
+        except Exception as json_error:
+            print(f"JSON serialization error: {json_error}")
+            # Fallback response with minimal data
+            response = {
+                'predicted_yield_kg': round(float(predicted_yield), 2),
+                'input_features': {
+                    'crop_type': crop_type,
+                    'farm_size_ha': farm_size_ha,
+                    'phosphorus': phosphorus,
+                    'potassium': potassium,
+                    'irrigation_available': irrigation_available
+                },
+                'model_details': {'note': 'Detailed data unavailable due to serialization error'},
+                'api_data': {
+                    'weather': {'avg_temp': float(avg_temp), 'rainfall': float(rainfall)},
+                    'soil': {'phh2o': soil_data.get('phh2o', 6.5)},
+                    'region': region,
+                    'month': int(current_month),
+                    'location': {
+                        'name': location_data['name'],
+                        'display_name': location_data['display_name'],
+                        'coordinates': {'lat': float(lat), 'lon': float(lon)}
+                    }
+                }
+            }
         
         print("\n📤 RESPONSE SENT TO CLIENT:")
         print("-" * 40)

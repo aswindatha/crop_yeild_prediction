@@ -301,6 +301,7 @@ class _PredictionScreenState extends State<PredictionScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      _resultRow('Location', result['api_data']?['location']?['name']?.toString() ?? 'Unknown Location'),
                       _resultRow('Crop', (result['input_features']['crop_type'] as String).toString()),
                       _resultRow('Region', (result['api_data']['region'] as String).toString()),
                       _resultRow('Temperature', '${result['api_data']['weather']['avg_temp']}°C'),
