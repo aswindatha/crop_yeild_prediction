@@ -8,11 +8,26 @@ import torch.nn.functional as F
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from datetime import datetime
 import warnings
+import math
+import time
+import os
+from config import GOOGLE_MAPS_API_KEY
 warnings.filterwarnings('ignore')
 
 app = Flask(__name__)
 # Allow all origins for development
 CORS(app, resources={r"/*": {"origins": "*"}})
+
+# Google Maps Geocoding API configuration
+# Use environment variable if available, otherwise use config file
+GOOGLE_MAPS_API_KEY = os.environ.get('GOOGLE_MAPS_API_KEY', GOOGLE_MAPS_API_KEY)
+GOOGLE_GEOCODING_URL = "https://maps.googleapis.com/maps/api/geocode/json"
+GOOGLE_WEATHER_URL = "https://maps.googleapis.com/maps/api/weather/json"
+GOOGLE_TIMEZONE_URL = "https://maps.googleapis.com/maps/api/timezone/json"
+
+# Location cache for performance
+location_cache = {}
+CACHE_EXPIRY_SECONDS = 3600  # 1 hour cache
 
 # ML Model Classes (same as in predict.py)
 class MDN(nn.Module):
@@ -281,7 +296,40 @@ def stop_monitoring():
     return True
 
 def get_weather_data(lat, lon):
-    """Fetch weather data from Open-Meteo API"""
+    """Fetch weather data from Google Maps Weather API"""
+    try:
+        params = {
+            'location': f"{lat},{lon}",
+            'key': GOOGLE_MAPS_API_KEY,
+        }
+        
+        response = requests.get(GOOGLE_WEATHER_URL, params=params, timeout=10)
+        data = response.json()
+        
+        if response.status_code == 200 and 'current' in data:
+            current = data['current']
+            avg_temp = current.get('temperature', 25.0)
+            rainfall = current.get('precipitation', 0.0)
+            humidity_percent = current.get('humidity', 70.0)
+            
+            print(f"  Google Maps Weather API successful:")
+            print(f"    Temperature: {avg_temp}°C")
+            print(f"    Rainfall: {rainfall}mm")
+            print(f"    Humidity: {humidity_percent}%")
+            
+            return avg_temp, rainfall, humidity_percent
+        else:
+            print(f"  Google Maps Weather API error: {data.get('status', 'Unknown error')}")
+            # Fallback to Open-Meteo
+            return get_weather_data_fallback(lat, lon)
+            
+    except Exception as e:
+        print(f"  Google Maps Weather API error: {e}")
+        # Fallback to Open-Meteo
+        return get_weather_data_fallback(lat, lon)
+
+def get_weather_data_fallback(lat, lon):
+    """Fallback: Fetch weather data from Open-Meteo API"""
     try:
         url = f"https://api.open-meteo.com/v1/forecast"
         params = {
@@ -300,12 +348,82 @@ def get_weather_data(lat, lon):
         rainfall = daily.get('precipitation_sum', [50.0])[0]
         humidity_percent = daily.get('relative_humidity_2m_mean', [70.0])[0]
         
+        print(f"  Using Open-Meteo fallback weather data")
         return avg_temp, rainfall, humidity_percent
         
     except Exception as e:
         print(f"Weather API error: {e}")
         # Return default values
         return 25.0, 50.0, 70.0
+
+def calculate_synthetic_nutrients(soil_data, weather_data):
+    """Calculate synthetic soil nutrients using scientific formulas"""
+    try:
+        # Extract base parameters
+        total_nitrogen = soil_data.get('nitrogen', 0.8)  # % 
+        soc = soil_data.get('soc', 1.5)  # %
+        ph = soil_data.get('phh2o', 6.5)
+        clay = soil_data.get('clay', 30.0)  # %
+        cec = soil_data.get('cec', 15.0)  # cmol/kg
+        humidity = weather_data[2]  # humidity_percent
+        temperature = weather_data[0]  # avg_temp
+        
+        print("\n CALCULATING SYNTHETIC NUTRIENTS...")
+        print("-" * 40)
+        print(f"  Base Parameters:")
+        print(f"    Total Nitrogen: {total_nitrogen}%")
+        print(f"    SOC: {soc}%")
+        print(f"    pH: {ph}")
+        print(f"    Clay: {clay}%")
+        print(f"    CEC: {cec} cmol/kg")
+        print(f"    Humidity: {humidity}%")
+        print(f"    Temperature: {temperature}°C")
+        
+        # Calculate Ammonia (NH4+): (Total N × 10) × (SOC / 1.5) × (Temp / 25) × 0.2
+        ammonia = (total_nitrogen * 10) * (soc / 1.5) * (temperature / 25) * 0.2
+        
+        # Calculate Nitrate (NO3-): (Total N × 10) × (Humidity / 100) × (pH / 7) × 0.5
+        nitrate = (total_nitrogen * 10) * (humidity / 100) * (ph / 7) * 0.5
+        
+        # Calculate Iron (Fe): 20 × (1 + (6.5 - pH) × 0.6) × (Clay / 30)
+        iron = 20 * (1 + (6.5 - ph) * 0.6) * (clay / 30)
+        
+        # Calculate Manganese (Mn): 12 × (1 + (6.5 - pH) × 0.5) × (Humidity / 70)
+        manganese = 12 * (1 + (6.5 - ph) * 0.5) * (humidity / 70)
+        
+        # Calculate Zinc (Zn): 1.5 × (SOC / 1.5) × (CEC / 15) × (1 + (6.5 - pH) × 0.3)
+        zinc = 1.5 * (soc / 1.5) * (cec / 15) * (1 + (6.5 - ph) * 0.3)
+        
+        synthetic_nutrients = {
+            'ammonia_mg_kg': round(ammonia, 2),
+            'nitrate_mg_kg': round(nitrate, 2),
+            'iron_mg_kg': round(iron, 2),
+            'manganese_mg_kg': round(manganese, 2),
+            'zinc_mg_kg': round(zinc, 2),
+            'source': 'Synthetic API Calculation',
+            'calculation_timestamp': datetime.now().isoformat()
+        }
+        
+        print(f"\n  Synthetic Nutrient Results:")
+        print(f"    Ammonia (NH₄⁺): {ammonia:.2f} mg/kg")
+        print(f"    Nitrate (NO₃⁻): {nitrate:.2f} mg/kg")
+        print(f"    Iron (Fe): {iron:.2f} mg/kg")
+        print(f"    Manganese (Mn): {manganese:.2f} mg/kg")
+        print(f"    Zinc (Zn): {zinc:.2f} mg/kg")
+        
+        return synthetic_nutrients
+        
+    except Exception as e:
+        print(f"Error calculating synthetic nutrients: {e}")
+        return {
+            'ammonia_mg_kg': 0.0,
+            'nitrate_mg_kg': 0.0,
+            'iron_mg_kg': 0.0,
+            'manganese_mg_kg': 0.0,
+            'zinc_mg_kg': 0.0,
+            'source': 'Synthetic API Calculation (Error)',
+            'error': str(e)
+        }
 
 def get_soil_data(lat, lon):
     """Fetch soil data from ISRIC SoilGrids API"""
@@ -364,76 +482,114 @@ def get_soil_data(lat, lon):
     
     return soil_properties
 
-def get_location_name(lat, lon):
-    """Get location name from coordinates using Nominatim API"""
+def get_location_name(lat, lon, accuracy=None):
+    """Get location name from coordinates using Google Maps Geocoding API with caching"""
+    
+    # Check cache first
+    cache_key = f"{lat:.6f},{lon:.6f}"
+    current_time = time.time()
+    
+    if cache_key in location_cache:
+        cached_data, cache_time = location_cache[cache_key]
+        # Check if cache is still valid
+        if current_time - cache_time < CACHE_EXPIRY_SECONDS:
+            print(f"  Using cached location data for {lat:.6f}, {lon:.6f}")
+            return cached_data
+    
+    # Check if we have a nearby cached location (within 50 meters)
+    for cached_key, (cached_data, cache_time) in location_cache.items():
+        if current_time - cache_time < CACHE_EXPIRY_SECONDS:
+            cached_lat, cached_lon = map(float, cached_key.split(','))
+            distance = calculate_distance(lat, lon, cached_lat, cached_lon)
+            if distance <= 0.05:  # 50 meters
+                print(f"  Using nearby cached location data ({distance:.1f}m away)")
+                return cached_data
+    
     try:
-        url = "https://nominatim.openstreetmap.org/reverse"
         params = {
-            'lat': lat,
-            'lon': lon,
-            'format': 'json',
-            'addressdetails': 1,
-            'zoom': 10
+            'latlng': f"{lat},{lon}",
+            'key': GOOGLE_MAPS_API_KEY,
+            'result_type': 'street_address|locality|administrative_area_level_1|country',
         }
         
-        headers = {
-            'User-Agent': 'CropYieldPredictor/1.0'
-        }
-        
-        response = requests.get(url, params=params, headers=headers, timeout=10)
+        response = requests.get(GOOGLE_GEOCODING_URL, params=params, timeout=10)
         data = response.json()
         
-        if response.status_code == 200 and 'address' in data:
-            address = data['address']
+        if response.status_code == 200 and data.get('status') == 'OK' and data.get('results'):
+            result = data['results'][0]  # Use the first (most accurate) result
+            address_components = result.get('address_components', [])
             
-            # Build location name from available components
-            location_parts = []
+            # Extract location components
+            city = None
+            state = None
+            country = None
             
-            # Add village/town/city if available
-            if 'village' in address:
-                location_parts.append(address['village'])
-            elif 'town' in address:
-                location_parts.append(address['town'])
-            elif 'city' in address:
-                location_parts.append(address['city'])
+            for component in address_components:
+                types = component.get('types', [])
+                if 'locality' in types:
+                    city = component.get('long_name')
+                elif 'administrative_area_level_1' in types:
+                    state = component.get('long_name')
+                elif 'country' in types:
+                    country = component.get('long_name')
             
-            # Add district if available
-            if 'county' in address:
-                location_parts.append(address['county'])
-            elif 'district' in address:
-                location_parts.append(address['district'])
-            
-            # Add state if available
-            if 'state' in address:
-                location_parts.append(address['state'])
-            
-            # If no specific parts, use display name
-            if not location_parts and 'display_name' in data:
-                # Take first few parts of display name
-                display_name = data['display_name'].split(',')
-                location_parts = [part.strip() for part in display_name[:3]]
-            
-            location_name = ', '.join(location_parts) if location_parts else data.get('display_name', 'Unknown Location')
-            
-            return {
-                'name': location_name,
-                'display_name': data.get('display_name', location_name),
-                'address': address
+            location_data = {
+                'name': result.get('formatted_address', 'Unknown Location'),
+                'city': city,
+                'state': state,
+                'country': country,
+                'accuracy': accuracy,
+                'timestamp': datetime.now().isoformat(),
+                'latitude': lat,
+                'longitude': lon
             }
+            
+            # Cache the result
+            location_cache[cache_key] = (location_data, current_time)
+            
+            print(f"  Google Maps Geocoding successful:")
+            print(f"    Formatted Address: {location_data['name']}")
+            print(f"    City: {city}")
+            print(f"    State: {state}")
+            print(f"    Country: {country}")
+            
+            return location_data
         else:
+            error_msg = data.get('error_message', data.get('status', 'Unknown error'))
+            print(f"  Google Maps API error: {error_msg}")
             return {
-                'name': f'Lat: {lat:.4f}, Lon: {lon:.4f}',
-                'display_name': f'Lat: {lat:.4f}, Lon: {lon:.4f}',
-                'address': {}
+                'name': 'Unknown Location',
+                'city': None,
+                'state': None,
+                'country': None,
+                'error': error_msg
             }
             
     except Exception as e:
-        print(f"Geocoding API error: {e}")
+        print(f"  Error calling Google Maps API: {e}")
         return {
-            'name': f'Lat: {lat:.4f}, Lon: {lon:.4f}',
-            'display_name': f'Lat: {lat:.4f}, Lon: {lon:.4f}',
-            'address': {}
+            'name': 'Unknown Location',
+            'city': None,
+            'state': None,
+            'country': None,
+            'error': str(e)
         }
+
+def calculate_distance(lat1, lon1, lat2, lon2):
+    """Calculate distance between two coordinates in kilometers"""
+    R = 6371  # Earth's radius in kilometers
+    
+    lat1_rad = math.radians(lat1)
+    lat2_rad = math.radians(lat2)
+    delta_lat = math.radians(lat2 - lat1)
+    delta_lon = math.radians(lon2 - lon1)
+    
+    a = (math.sin(delta_lat/2)**2 + 
+         math.cos(lat1_rad) * math.cos(lat2_rad) * 
+         math.sin(delta_lon/2)**2)
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+    
+    return R * c
 
 def determine_region(lat):
     """Determine region based on latitude"""
@@ -485,18 +641,6 @@ def predict_yield(input_features):
         
         # Average prediction
         avg_pred = (mdn_pred + transformer_pred) / 2
-        
-        # Convert numpy types to Python native types for JSON serialization
-        def convert_to_native(obj):
-            if isinstance(obj, (np.integer, np.floating)):
-                return float(obj) if isinstance(obj, np.floating) else int(obj)
-            elif isinstance(obj, np.ndarray):
-                return obj.tolist()
-            elif isinstance(obj, dict):
-                return {key: convert_to_native(value) for key, value in obj.items()}
-            elif isinstance(obj, (list, tuple)):
-                return [convert_to_native(item) for item in obj]
-            return obj
         
         return float(avg_pred), {
             'mdn_prediction': float(mdn_pred),
@@ -583,11 +727,13 @@ def convert_to_native(obj):
     """Convert numpy types to native Python types for JSON serialization"""
     if isinstance(obj, np.ndarray):
         return obj.tolist()
-    elif isinstance(obj, (np.int_, np.intc, np.intp, np.int8, np.int16, np.int32, np.int64,
+    elif isinstance(obj, (np.intc, np.intp, np.int8, np.int16, np.int32, np.int64,
                           np.uint8, np.uint16, np.uint32, np.uint64)):
         return int(obj)
-    elif isinstance(obj, (np.float_, np.float16, np.float32, np.float64)):
+    elif isinstance(obj, (np.float16, np.float32, np.float64)):
         return float(obj)
+    elif isinstance(obj, (np.bool_,)):
+        return bool(obj)
     elif isinstance(obj, dict):
         return {key: convert_to_native(value) for key, value in obj.items()}
     elif isinstance(obj, list):
@@ -610,14 +756,34 @@ def predict():
         print("-" * 40)
         print(f"  Latitude: {data.get('latitude')}")
         print(f"  Longitude: {data.get('longitude')}")
+        print(f"  Accuracy: {data.get('accuracy', 'Not provided')} meters")
+        print(f"  Timestamp: {data.get('timestamp', 'Not provided')}")
         print(f"  Crop Type: {data.get('crop_type')}")
-        print(f"  Phosphorus: {data.get('phosphorus')} mg/kg")
-        print(f"  Potassium: {data.get('potassium')} mg/kg")
+        print(f"  Phosphorus: {data.get('phosphorus', 'Not provided')} mg/kg")
+        print(f"  Potassium: {data.get('potassium', 'Not provided')} mg/kg")
         print(f"  Irrigation Available: {data.get('irrigation_available')}")
         print(f"  Farm Size: {data.get('farm_size_ha')} hectares")
         
-        # Validate required fields
-        required_fields = ['latitude', 'longitude', 'crop_type', 'phosphorus', 'potassium', 'irrigation_available', 'farm_size_ha']
+        # Validate accuracy if provided
+        accuracy = data.get('accuracy')
+        if accuracy is not None:
+            accuracy = float(accuracy)
+            if accuracy > 50:
+                return jsonify({'error': f'Location accuracy too poor: {accuracy:.1f}m. Maximum allowed is 50m.'}), 400
+            print(f"  ✓ Location accuracy acceptable: {accuracy:.1f}m")
+        
+        # Validate required fields (support both basic and soil API modes)
+        if 'phosphorus' in data and 'potassium' in data:
+            # Basic mode
+            required_fields = ['latitude', 'longitude', 'crop_type', 'phosphorus', 'potassium', 'irrigation_available', 'farm_size_ha']
+        else:
+            # Soil API mode
+            required_fields = ['latitude', 'longitude', 'crop_type', 'irrigation_available', 'farm_size_ha']
+            soil_fields = ['soil_ph', 'soil_nitrogen', 'soil_organic_carbon', 'soil_sand', 'soil_silt', 'soil_clay']
+            for field in soil_fields:
+                if field in data:
+                    required_fields.append(field)
+        
         for field in required_fields:
             if field not in data:
                 return jsonify({'error': f'Missing required field: {field}'}), 400
@@ -655,11 +821,21 @@ def predict():
         print(f"  Sand: {soil_data['sand']}%")
         print(f"  Silt: {soil_data['silt']}%")
         
+        # Calculate synthetic nutrients
+        weather_data_tuple = (avg_temp, rainfall, humidity_percent)
+        synthetic_nutrients = calculate_synthetic_nutrients(soil_data, weather_data_tuple)
+        
         # Get location name
         print("\n FETCHING LOCATION NAME...")
         print("-" * 40)
-        location_data = get_location_name(lat, lon)
+        location_data = get_location_name(lat, lon, accuracy)
         print(f"  Location Name: {location_data['name']}")
+        if location_data.get('city'):
+            print(f"  City: {location_data['city']}")
+        if location_data.get('state'):
+            print(f"  State: {location_data['state']}")
+        if location_data.get('country'):
+            print(f"  Country: {location_data['country']}")
         
         # Determine region
         print("\n REGION DETERMINATION...")
@@ -731,9 +907,13 @@ def predict():
                     'month': int(current_month),
                     'location': {
                         'name': location_data['name'],
-                        'display_name': location_data['display_name'],
+                        'city': location_data.get('city'),
+                        'state': location_data.get('state'),
+                        'country': location_data.get('country'),
+                        'accuracy': location_data.get('accuracy'),
                         'coordinates': {'lat': float(lat), 'lon': float(lon)}
-                    }
+                    },
+                    'synthetic_nutrients': synthetic_nutrients
                 }
             }
         except Exception as json_error:
@@ -756,11 +936,50 @@ def predict():
                     'month': int(current_month),
                     'location': {
                         'name': location_data['name'],
-                        'display_name': location_data['display_name'],
+                        'city': location_data.get('city'),
+                        'state': location_data.get('state'),
+                        'country': location_data.get('country'),
+                        'accuracy': location_data.get('accuracy'),
                         'coordinates': {'lat': float(lat), 'lon': float(lon)}
-                    }
+                    },
+                    'synthetic_nutrients': synthetic_nutrients
                 }
             }
+        
+        # Print unified dictionary of all 15 parameters
+        print("\n📋 UNIFIED PARAMETER DICTIONARY (All 15 Parameters):")
+        print("-" * 60)
+        
+        unified_params = {
+            # Core Parameters (10)
+            'latitude': {'value': float(lat), 'source': 'GPS Input'},
+            'longitude': {'value': float(lon), 'source': 'GPS Input'},
+            'accuracy_meters': {'value': accuracy, 'source': 'GPS Input'},
+            'crop_type': {'value': crop_type, 'source': 'User Input'},
+            'phosphorus_mg_kg': {'value': phosphorus, 'source': 'User Input'},
+            'potassium_mg_kg': {'value': potassium, 'source': 'User Input'},
+            'irrigation_available': {'value': irrigation_available, 'source': 'User Input'},
+            'farm_size_ha': {'value': farm_size_ha, 'source': 'User Input'},
+            'temperature_celsius': {'value': avg_temp, 'source': 'Weather API'},
+            'rainfall_mm': {'value': rainfall, 'source': 'Weather API'},
+            
+            # Soil Parameters (3)
+            'soil_ph': {'value': soil_data['phh2o'], 'source': 'SoilGrids API'},
+            'soil_organic_carbon_percent': {'value': soil_data['soc'], 'source': 'SoilGrids API'},
+            'soil_nitrogen_percent': {'value': soil_data['nitrogen'], 'source': 'SoilGrids API'},
+            
+            # Synthetic Nutrients (5) - Marked as from Supplemental API
+            'ammonia_nh4_mg_kg': {'value': synthetic_nutrients['ammonia_mg_kg'], 'source': 'Fetched from Supplemental API'},
+            'nitrate_no3_mg_kg': {'value': synthetic_nutrients['nitrate_mg_kg'], 'source': 'Fetched from Supplemental API'},
+            'iron_fe_mg_kg': {'value': synthetic_nutrients['iron_mg_kg'], 'source': 'Fetched from Supplemental API'},
+            'manganese_mn_mg_kg': {'value': synthetic_nutrients['manganese_mg_kg'], 'source': 'Fetched from Supplemental API'},
+            'zinc_zn_mg_kg': {'value': synthetic_nutrients['zinc_mg_kg'], 'source': 'Fetched from Supplemental API'},
+        }
+        
+        for param, data in unified_params.items():
+            print(f"  {param}: {data['value']} (Source: {data['source']})")
+        
+        print("="*80 + "\n")
         
         print("\n📤 RESPONSE SENT TO CLIENT:")
         print("-" * 40)
