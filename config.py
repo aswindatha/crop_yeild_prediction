@@ -15,7 +15,3 @@ GOOGLE_MAPS_API_KEY = "your_api_key_here"
 # - Geocoding API (address lookup) 
 # - Weather API (weather data)
 # - Time Zone API (timezone context)
-
-# Optional: You can also set this as an environment variable
-# In your terminal: export GOOGLE_MAPS_API_KEY="your_actual_api_key_here"
-# Then modify server.py to use: os.environ.get('GOOGLE_MAPS_API_KEY', 'YOUR_ACTUAL_API_KEY_HERE')
