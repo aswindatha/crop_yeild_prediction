@@ -13,7 +13,7 @@ import java.net.URL
 
 class LocationDataManager(private val context: Context) {
     
-    private val apiKey = "AIzaSyC4_a6rDqGk3-UvRVJwnG-_z1DPWfNFOyE"
+    private val apiKey = "your_api_key_here"
     private val TAG = "LocationDataManager"
     
     data class LocationData(

@@ -8,7 +8,7 @@
 # 4. Create credentials -> API Key
 # 5. Copy the API key and replace the placeholder below
 
-GOOGLE_MAPS_API_KEY = "AIzaSyC4_a6rDqGk3-UvRVJwnG-_z1DPWfNFOyE"
+GOOGLE_MAPS_API_KEY = "your_api_key_here"
 
 # This single key works for all enabled APIs:
 # - Geolocation API (backup location detection)
