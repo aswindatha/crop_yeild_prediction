@@ -11,7 +11,18 @@ import warnings
 import math
 import time
 import os
+import socket
+import qrcode
+from PIL import Image
+import io
+import threading
+import sys
 from config import GOOGLE_MAPS_API_KEY
+
+# Platform-specific imports
+if sys.platform != 'win32':
+    import termios
+    import tty
 warnings.filterwarnings('ignore')
 
 app = Flask(__name__)
@@ -28,6 +39,65 @@ GOOGLE_TIMEZONE_URL = "https://maps.googleapis.com/maps/api/timezone/json"
 # Location cache for performance
 location_cache = {}
 CACHE_EXPIRY_SECONDS = 3600  # 1 hour cache
+
+def get_local_ip():
+    """Get the local IP address for network access"""
+    try:
+        # Create a socket to determine the local IP
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        local_ip = s.getsockname()[0]
+        s.close()
+        return local_ip
+    except Exception:
+        return "127.0.0.1"
+
+def print_network_url(port=5000):
+    """Display network URL with QR code using qrcode-terminal"""
+    ip = get_local_ip()
+    url = f"http://{ip}:{port}"
+    
+    try:
+        import qrcode_terminal
+        print(f"\n  📱 Scan QR code to access Smart Farm:")
+        qrcode_terminal.draw(url)
+        print(f"  🌐 Or open: {url}")
+    except ImportError:
+        # Fallback if qrcode-terminal not installed
+        print(f"  🌐 Open: {url}")
+
+def print_qr_code():
+    """Print QR code for server URL"""
+    print_network_url(5000)
+
+def keyboard_listener():
+    """Listen for 'q' key to print QR code"""
+    print("💡 Press 'q' at any time to display the QR code for mobile connection")
+    
+    while True:
+        try:
+            # For Windows
+            if sys.platform == 'win32':
+                import msvcrt
+                if msvcrt.kbhit() and msvcrt.getch().decode('utf-8').lower() == 'q':
+                    print_qr_code()
+            else:
+                # For Unix-like systems
+                fd = sys.stdin.fileno()
+                old_settings = termios.tcgetattr(fd)
+                try:
+                    tty.setraw(sys.stdin.fileno())
+                    ch = sys.stdin.read(1)
+                    if ch.lower() == 'q':
+                        print_qr_code()
+                finally:
+                    termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        except ImportError:
+            # Fallback if platform-specific modules aren't available
+            pass
+        except:
+            pass
+        time.sleep(0.1)
 
 # ML Model Classes (same as in predict.py)
 class MDN(nn.Module):
@@ -1014,6 +1084,13 @@ if __name__ == '__main__':
         print("Please check the error messages above for details.")
         print("!"*50 + "\n")
         exit(1)
+    
+    # Start keyboard listener in background
+    listener_thread = threading.Thread(target=keyboard_listener, daemon=True)
+    listener_thread.start()
+    
+    # Print QR code on startup
+    print_qr_code()
     
     # Start the server
     print("\n" + "="*50)

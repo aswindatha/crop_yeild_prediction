@@ -5,6 +5,9 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'qr_scanner_new.dart';
+import 'location_picker_service_new.dart';
+import 'manual_location_picker.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -119,6 +122,10 @@ class _PredictionScreenState extends State<PredictionScreen> with SingleTickerPr
   final TextEditingController _ironController = TextEditingController();
   final TextEditingController _manganeseController = TextEditingController();
   
+  // Location controllers (editable in Custom Input tab)
+  final TextEditingController _latitudeController = TextEditingController();
+  final TextEditingController _longitudeController = TextEditingController();
+  
   // Form state
   String? _selectedCropType;
   bool _irrigationAvailable = false;
@@ -129,7 +136,7 @@ class _PredictionScreenState extends State<PredictionScreen> with SingleTickerPr
   bool _isTestingConnection = false;
   String _connectionStatus = '';
   bool _connectionSuccessful = false;
-  String _apiUrl = 'http://172.16.208.211:5000'; // Using the current IP address from your Flask server logs
+  String _apiUrl = 'http://localhost:5000'; // Using the current IP address from your Flask server logs
   
   // Validation errors
   Map<String, String> _validationErrors = {};
@@ -174,6 +181,10 @@ class _PredictionScreenState extends State<PredictionScreen> with SingleTickerPr
     _zincController.addListener(_clearValidationErrors);
     _ironController.addListener(_clearValidationErrors);
     _manganeseController.addListener(_clearValidationErrors);
+    
+    // Location listeners
+    _latitudeController.addListener(_clearValidationErrors);
+    _longitudeController.addListener(_clearValidationErrors);
   }
 
   Future<void> _loadApiUrl() async {
@@ -256,6 +267,10 @@ class _PredictionScreenState extends State<PredictionScreen> with SingleTickerPr
         _currentAccuracy = avgAccuracy;
         _locationTimestamp = DateTime.now().toIso8601String();
         _isGettingHighPrecisionLocation = false;
+        
+        // Populate editable location controllers
+        _latitudeController.text = avgLat.toStringAsFixed(6);
+        _longitudeController.text = avgLon.toStringAsFixed(6);
       });
       
       _showMessage('High-precision location acquired (${avgAccuracy.toStringAsFixed(1)}m accuracy)');
@@ -370,6 +385,22 @@ class _PredictionScreenState extends State<PredictionScreen> with SingleTickerPr
   
   bool _validateSoilApiTab() {
     final errors = <String, String>{};
+    
+    // Validate phosphorus (mg/kg) - typical range: 0-100 mg/kg
+    final phosphorus = double.tryParse(_phosphorusController.text);
+    if (phosphorus == null) {
+      errors['phosphorus'] = 'Please enter a valid phosphorus value';
+    } else if (phosphorus < 0 || phosphorus > 100) {
+      errors['phosphorus'] = 'Phosphorus must be between 0 and 100 mg/kg';
+    }
+    
+    // Validate potassium (mg/kg) - typical range: 0-300 mg/kg
+    final potassium = double.tryParse(_potassiumController.text);
+    if (potassium == null) {
+      errors['potassium'] = 'Please enter a valid potassium value';
+    } else if (potassium < 0 || potassium > 300) {
+      errors['potassium'] = 'Potassium must be between 0 and 300 mg/kg';
+    }
     
     // Validate soil pH - typical range: 3.0-10.0
     final soilPh = double.tryParse(_soilPhController.text);
@@ -487,9 +518,17 @@ class _PredictionScreenState extends State<PredictionScreen> with SingleTickerPr
     });
 
     try {
+      // For Custom Input tab, use values from editable controllers
+      final latitude = _tabController.index == 1 
+          ? double.tryParse(_latitudeController.text) ?? _currentPosition!.latitude
+          : _currentPosition!.latitude;
+      final longitude = _tabController.index == 1
+          ? double.tryParse(_longitudeController.text) ?? _currentPosition!.longitude
+          : _currentPosition!.longitude;
+      
       final requestBody = {
-        'latitude': _currentPosition!.latitude,
-        'longitude': _currentPosition!.longitude,
+        'latitude': latitude,
+        'longitude': longitude,
         'accuracy': _currentAccuracy ?? _currentPosition!.accuracy,
         'timestamp': _locationTimestamp ?? DateTime.now().toIso8601String(),
         'crop_type': _selectedCropType,
@@ -504,6 +543,8 @@ class _PredictionScreenState extends State<PredictionScreen> with SingleTickerPr
         requestBody['potassium'] = double.parse(_potassiumController.text);
       } else {
         // Soil API tab - use comprehensive soil data
+        requestBody['phosphorus'] = double.parse(_phosphorusController.text);
+        requestBody['potassium'] = double.parse(_potassiumController.text);
         requestBody['soil_ph'] = double.parse(_soilPhController.text);
         requestBody['soil_nitrogen'] = double.parse(_soilNitrogenController.text);
         requestBody['soil_organic_carbon'] = double.parse(_soilOrganicCarbonController.text);
@@ -988,52 +1029,33 @@ class _PredictionScreenState extends State<PredictionScreen> with SingleTickerPr
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Location
+          // Manual Map Location Picker
           _sectionCard(
-            title: 'Location',
-            icon: Icons.location_on_rounded,
-            iconBg: AppColors.primary,
-            child: _currentPosition != null
-                ? Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _infoRow(Icons.my_location_rounded, 'Lat', _currentPosition!.latitude.toStringAsFixed(6)),
-                      const SizedBox(height: 8),
-                      _infoRow(Icons.my_location_rounded, 'Lon', _currentPosition!.longitude.toStringAsFixed(6)),
-                      const SizedBox(height: 12),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: AppColors.success.withOpacity(0.12),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(Icons.check_circle_rounded, size: 18, color: AppColors.success),
-                            const SizedBox(width: 8),
-                            Text('Location acquired (${_currentAccuracy?.toStringAsFixed(1)}m accuracy)', style: GoogleFonts.poppins(fontSize: 13, color: AppColors.success, fontWeight: FontWeight.w500)),
-                          ],
-                        ),
-                      ),
-                    ],
-                  )
-                : Row(
-                    children: [
-                      if (_isGettingHighPrecisionLocation) ...[
-                        SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
-                        ),
-                        const SizedBox(width: 12),
-                        Text('Getting high-precision location...', style: GoogleFonts.poppins(color: AppColors.textSecondary)),
-                      ] else ...[
-                        Icon(Icons.location_disabled_rounded, color: AppColors.textSecondary),
-                        const SizedBox(width: 12),
-                        Text('Location not available', style: GoogleFonts.poppins(color: AppColors.textSecondary)),
-                      ],
-                    ],
-                  ),
+            title: 'Pick Location from Map',
+            icon: Icons.map_outlined,
+            iconBg: const Color(0xFF2D6A4F),
+            child: ManualLocationPicker(
+              initialLatitude: _currentPosition?.latitude,
+              initialLongitude: _currentPosition?.longitude,
+              onLocationSelected: (lat, lng) {
+                setState(() {
+                  _currentPosition = Position(
+                    latitude: lat,
+                    longitude: lng,
+                    accuracy: 0.0,
+                    altitude: 0.0,
+                    altitudeAccuracy: 0.0,
+                    heading: 0.0,
+                    headingAccuracy: 0.0,
+                    speed: 0.0,
+                    speedAccuracy: 0.0,
+                    timestamp: DateTime.now(),
+                  );
+                  _currentAccuracy = 0.0;
+                });
+                _showMessage('Location set: ${lat.toStringAsFixed(6)}, ${lng.toStringAsFixed(6)}');
+              },
+            ),
           ),
           const SizedBox(height: 18),
 
@@ -1063,6 +1085,22 @@ class _PredictionScreenState extends State<PredictionScreen> with SingleTickerPr
             iconBg: const Color(0xFF2C7A7B),
             child: Column(
               children: [
+                _buildValidatedTextField(
+                  controller: _phosphorusController,
+                  labelText: 'Phosphorus (mg/kg)',
+                  hintText: 'e.g. 25.0',
+                  fieldKey: 'phosphorus',
+                  keyboardType: TextInputType.number,
+                ),
+                const SizedBox(height: 14),
+                _buildValidatedTextField(
+                  controller: _potassiumController,
+                  labelText: 'Potassium (mg/kg)',
+                  hintText: 'e.g. 150.0',
+                  fieldKey: 'potassium',
+                  keyboardType: TextInputType.number,
+                ),
+                const SizedBox(height: 14),
                 _buildValidatedTextField(
                   controller: _soilPhController,
                   labelText: 'Soil pH',
@@ -1272,6 +1310,10 @@ class _PredictionScreenState extends State<PredictionScreen> with SingleTickerPr
     _ironController.dispose();
     _manganeseController.dispose();
     
+    // Dispose location controllers
+    _latitudeController.dispose();
+    _longitudeController.dispose();
+    
     _tabController.dispose();
   }
 }
@@ -1327,6 +1369,41 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     }
   }
 
+  Future<void> _scanQRCode() async {
+    // Check camera permission
+    var cameraStatus = await Permission.camera.request();
+    if (!cameraStatus.isGranted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Camera permission is required to scan QR codes', style: GoogleFonts.poppins()),
+          backgroundColor: AppColors.error,
+        ),
+      );
+      return;
+    }
+
+    final result = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (context) => QRScannerScreen(
+          onScanned: (scannedUrl) {
+            // Validate and set the scanned URL
+            if (scannedUrl.startsWith('http://') || scannedUrl.startsWith('https://')) {
+              widget.apiUrlController.text = scannedUrl;
+              _testConnection(); // Auto-test the connection
+            } else {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Invalid URL format', style: GoogleFonts.poppins()),
+                  backgroundColor: AppColors.error,
+                ),
+              );
+            }
+          },
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Dialog(
@@ -1351,9 +1428,22 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             const SizedBox(height: 20),
             Text('Backend API URL', style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w500, color: AppColors.textSecondary)),
             const SizedBox(height: 8),
-            TextField(
-              controller: widget.apiUrlController,
-              decoration: const InputDecoration(hintText: 'http://172.16.208.211:5000'),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: widget.apiUrlController,
+                    decoration: InputDecoration(
+                      hintText: 'http://localhost:5000',
+                      suffixIcon: IconButton(
+                        icon: const Icon(Icons.qr_code_scanner_rounded),
+                        onPressed: _scanQRCode,
+                        tooltip: 'Scan QR Code',
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 16),
             if (_connectionStatus.isNotEmpty)
