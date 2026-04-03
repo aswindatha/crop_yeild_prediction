@@ -2,7 +2,7 @@
 
 ## Abstract
 
-CropWise represents a novel integration of deep learning architectures and agentic artificial intelligence for precision agriculture. This system employs a dual-model ensemble approach combining Mixture Density Networks (MDN) and Transformer-based regressors to provide accurate crop yield predictions with uncertainty quantification. The agentic framework enables autonomous monitoring, proactive decision-making, and real-time environmental analysis for optimal agricultural outcomes. This comprehensive system processes 17 multidimensional features including weather patterns, soil composition, and farm management parameters to deliver predictions with R² scores ranging from 0.80-0.90 and calibrated uncertainty intervals.
+CropWise represents a novel integration of deep learning architectures and agentic artificial intelligence for precision agriculture. This system employs a dual-model ensemble approach combining Mixture Density Networks (MDN) and Transformer-based regressors to provide accurate crop yield predictions with uncertainty quantification. The agentic framework enables autonomous monitoring, proactive decision-making, and real-time environmental analysis for optimal agricultural outcomes. This comprehensive system processes 22 multidimensional features including weather patterns, soil composition, advanced soil nutrients (Ammonia NH₄⁺, Nitrate NO₃⁻, Zinc, Iron, Manganese), and farm management parameters to deliver predictions with R² scores ranging from 0.80-0.90 and calibrated uncertainty intervals.
 
 ## Table of Contents
 
@@ -257,26 +257,31 @@ api_v1 = Blueprint('api_v1', __name__)
 
 #### 2.2.3 External Integration Layer
 
+**Google Maps API Suite Integration:**
+
 **Weather Data Integration:**
-- **Primary Source**: Open-Meteo API (https://api.open-meteo.com)
+- **Primary Source**: Google Maps Weather API (https://maps.googleapis.com/maps/api/weather)
 - **Data Points**: Temperature, precipitation, humidity, wind speed
 - **Update Frequency**: Real-time on prediction, hourly for monitoring
-- **Fallback**: WeatherAPI.com as secondary source
+- **Fallback**: Open-Meteo API as secondary source
 - **Data Quality**: Automatic validation and outlier detection
 
-**Soil Data Integration:**
-- **Primary Source**: ISRIC SoilGrids (https://rest.isric.org)
-- **Data Points**: pH, organic carbon, nitrogen, texture analysis
-- **Resolution**: 250m grid resolution with coordinate interpolation
-- **Coverage**: Global soil database with 150+ countries
-- **Update Strategy**: Cached data with 30-day refresh cycle
-
 **Geocoding Integration:**
-- **Service**: OpenStreetMap Nominatim (https://nominatim.openstreetmap.org)
+- **Service**: Google Maps Geocoding API (https://maps.googleapis.com/maps/api/geocode)
 - **Function**: Reverse geocoding (coordinates → location names)
 - **Data Returned**: Administrative boundaries, place names, postal codes
-- **Rate Limiting**: 1 request/second with request queuing
-- **Caching**: Local cache for frequently requested locations
+- **Rate Limiting**: Configurable with request queuing
+- **Caching**: Local cache with 50-meter proximity matching for frequently requested locations
+
+**Time Zone Integration:**
+- **Service**: Google Maps Time Zone API (https://maps.googleapis.com/maps/api/timezone)
+- **Function**: Accurate timestamp context for location-based predictions
+- **Data Returned**: Time zone ID, daylight savings offset, UTC offset
+
+**Geolocation Backup:**
+- **Service**: Google Maps Geolocation API (https://maps.googleapis.com/maps/api/geolocate)
+- **Function**: Backup location detection when GPS accuracy is poor
+- **Data Returned**: Estimated coordinates with accuracy metrics
 
 [add image: detailed system architecture diagram showing all components and data flows]
 
@@ -294,15 +299,21 @@ Stage 1: Input Validation
 └── Farm size validation (0.1-1000 hectares)
 
 Stage 2: Data Acquisition
-├── Weather data fetching (Open-Meteo API)
+├── Weather data fetching (Google Maps Weather API)
 │   ├── Current conditions
 │   ├── Historical averages (30 days)
 │   └── Forecast data (7 days)
-├── Soil data retrieval (ISRIC API)
+├── Soil data retrieval (ISRIC SoilGrids API)
 │   ├── Chemical properties (pH, nutrients)
 │   ├── Physical properties (texture, depth)
 │   └── Spatial interpolation
-└── Location resolution (Nominatim API)
+├── Advanced nutrients collection (Supplemental Soil API)
+│   ├── Ammonia (NH₄⁺ mg/kg)
+│   ├── Nitrate (NO₃⁻ mg/kg)
+│   ├── Iron (Fe mg/kg)
+│   ├── Manganese (Mn mg/kg)
+│   └── Zinc (Zn mg/kg)
+└── Location resolution (Google Maps Geocoding API)
     ├── Administrative boundaries
     ├── Place name extraction
     └── Regional classification
@@ -660,7 +671,7 @@ for epoch in range(max_epochs):
 
 ### 3.4 Feature Engineering Pipeline
 
-#### 3.4.1 Input Features (17 Dimensions)
+#### 3.4.1 Input Features (22 Dimensions)
 
 **Environmental Features (3):**
 1. **avg_temp**: Average temperature (°C)
@@ -754,6 +765,32 @@ for epoch in range(max_epochs):
     - Range: 0.1-1000 ha
     - Impact: Economies of scale, management intensity
     - Non-linear: Diminishing returns at large scales
+
+**Advanced Soil Nutrients (5):**
+19. **ammonia_nh4_mg_kg**: Ammonia nitrogen content (mg/kg)
+    - Range: 0.5-10.0 mg/kg
+    - Impact: Readily available nitrogen for plant uptake, microbial activity indicator
+    - Source: Supplemental Soil API
+
+20. **nitrate_no3_mg_kg**: Nitrate nitrogen content (mg/kg)
+    - Range: 1.0-15.0 mg/kg
+    - Impact: Primary form of nitrogen absorbed by plants, leaching indicator
+    - Source: Supplemental Soil API
+
+21. **iron_fe_mg_kg**: Iron content (mg/kg)
+    - Range: 10-50 mg/kg
+    - Impact: Chlorophyll synthesis, enzyme activation, pH-dependent availability
+    - Source: Supplemental Soil API
+
+22. **manganese_mn_mg_kg**: Manganese content (mg/kg)
+    - Range: 5-30 mg/kg
+    - Impact: Photosynthesis enzyme activation, nitrogen metabolism
+    - Source: Supplemental Soil API
+
+23. **zinc_zn_mg_kg**: Zinc content (mg/kg)
+    - Range: 0.5-5.0 mg/kg
+    - Impact: Enzyme cofactor, protein synthesis, auxin production
+    - Source: Supplemental Soil API
 
 #### 3.4.2 Feature Preprocessing
 
@@ -3293,6 +3330,14 @@ Response:
             "sand": 35.0,
             "silt": 35.0
         },
+        "synthetic_nutrients": {
+            "ammonia_mg_kg": 2.56,
+            "nitrate_mg_kg": 3.21,
+            "iron_mg_kg": 18.45,
+            "manganese_mg_kg": 12.34,
+            "zinc_mg_kg": 1.23,
+            "source": "Supplemental Soil API"
+        },
         "location": {
             "name": "Chennai, Tamil Nadu",
             "display_name": "Chennai, Tamil Nadu, India",
@@ -3373,6 +3418,7 @@ dependencies:
   geolocator: ^10.1.0             # GPS services
   permission_handler: ^11.0.1        # Permissions
   google_fonts: ^6.1.0              # Typography
+  mobile_scanner: ^3.5.6            # QR code scanning
   cupertino_icons: ^1.0.2            # Icons
 ```
 
@@ -3388,22 +3434,42 @@ dependencies:
 **Screen Architecture:**
 ```
 Main Prediction Screen
-├── Location Services
-│   ├── GPS coordinates display
-│   ├── Location permission handling
-│   └── Real-time positioning
-├── Input Forms
-│   ├── Crop type selector
-│   ├── Nutrient input fields
-│   ├── Irrigation toggle
-│   └── Farm size input
-├── Prediction Results
-│   ├── Yield display
-│   ├── Location information
-│   ├── Weather data
-│   └── Soil composition
+├── Two-Tab Interface
+│   ├── Basic Tab
+│   │   ├── GPS coordinates display (5-reading averaging)
+│   │   ├── Location permission handling
+│   │   ├── Crop type selector
+│   │   ├── Phosphorus & Potassium input fields
+│   │   ├── Irrigation toggle
+│   │   └── Farm size input
+│   └── Custom Input Tab
+│       ├── Editable location coordinates (manual override)
+│       ├── Comprehensive soil data inputs
+│       │   ├── pH, Nitrogen, Organic Carbon
+│       │   ├── Sand, Silt, Clay percentages
+│       │   └── Cation Exchange Capacity (CEC)
+│       ├── Advanced Nutrients Section
+│       │   ├── Ammonia (NH₄⁺) input
+│       │   ├── Nitrate (NO₃⁻) input
+│       │   ├── Iron (Fe) input
+│       │   ├── Manganese (Mn) input
+│       │   └── Zinc (Zn) input
+│       ├── Location picker for custom coordinates
+│       ├── Irrigation toggle
+│       └── Farm size input
+├── Prediction Results (Two-Tab Popup)
+│   ├── Prediction Tab
+│   │   ├── Yield display with gradient styling
+│   │   ├── Location display in bordered box (multi-line capable)
+│   │   └── Crop information summary
+│   └── Detailed Data Tab
+│       ├── Weather data (temperature, rainfall, humidity)
+│       ├── Soil properties (pH, SOC, nitrogen, texture, CEC)
+│       └── Advanced nutrients (NH₄⁺, NO₃⁻, Fe, Mn, Zn)
 └── Settings Panel
-    ├── API URL configuration
+    ├── QR Code Scanner (mobile_scanner package)
+    │   └── Scan QR to auto-configure backend URL
+    ├── Manual API URL configuration
     ├── Connection testing
     └── App preferences
 ```
@@ -3465,10 +3531,18 @@ Future<void> _predictYield() async {
 ### 8.5 User Experience Features
 
 **Location Services:**
-- Automatic GPS detection
-- Manual coordinate input
-- Location name display
-- Permission handling
+- Automatic GPS detection with 5-reading averaging
+- Manual coordinate input in Custom Input tab
+- Location picker for custom coordinates
+- Location name display with multi-line support
+- Permission handling with graceful degradation
+
+**QR Code Scanning:**
+- Scan QR code to auto-configure backend URL
+- Mobile scanner integration (mobile_scanner: ^3.5.6)
+- Camera permission handling
+- Real-time QR detection and parsing
+- Fallback to manual URL entry
 
 **Real-time Feedback:**
 - Loading indicators
@@ -3481,6 +3555,50 @@ Future<void> _predictYield() async {
 - Weather information cards
 - Soil composition breakdown
 - Location mapping
+
+### 8.6 QR Code Integration
+
+**Implementation:**
+```dart
+// QR Code Scanner Implementation
+import 'package:mobile_scanner/mobile_scanner.dart';
+
+class QRScannerDialog extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      child: MobileScanner(
+        onDetect: (capture) {
+          final List<Barcode> barcodes = capture.barcodes;
+          for (final barcode in barcodes) {
+            if (barcode.rawValue != null) {
+              // Parse backend URL from QR code
+              final url = barcode.rawValue!;
+              if (url.startsWith('http')) {
+                Navigator.of(context).pop(url);
+              }
+            }
+          }
+        },
+      ),
+    );
+  }
+}
+```
+
+**Features:**
+- **Automatic Backend Configuration**: Scan QR code containing backend URL
+- **Camera Integration**: Uses device camera for real-time scanning
+- **Error Handling**: Validates URL format before configuration
+- **Fallback Support**: Manual entry option if scanning fails
+- **Permission Management**: Handles camera permissions gracefully
+
+**QR Code Format:**
+```
+Content: Backend API URL
+Example: http://192.168.1.100:5000
+Format: Plain text URL
+```
 
 ---
 
